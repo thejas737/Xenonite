@@ -1,0 +1,101 @@
+#include <stdio.h>
+#include <stdbool.h>
+
+#define MAX_PROCESSES 10
+#define MAX_RESOURCES 10
+
+// System State Matrices
+int available[MAX_RESOURCES];
+int maximum[MAX_PROCESSES][MAX_RESOURCES];
+int allocation[MAX_PROCESSES][MAX_RESOURCES];
+int need[MAX_PROCESSES][MAX_RESOURCES];
+
+int num_processes = 0;
+int num_resources = 0;
+
+// 1. Calculate the Need Matrix (Need = Max - Allocation)
+void calculate_need() {
+    for (int i = 0; i < num_processes; i++) {
+        for (int j = 0; j < num_resources; j++) {
+            need[i][j] = maximum[i][j] - allocation[i][j];
+        }
+    }
+}
+
+// 2. Banker's Algorithm: Check if current state is SAFE
+bool is_safe_state(int safe_sequence[]) {
+    bool finish[MAX_PROCESSES] = {false};
+    int work[MAX_RESOURCES];
+    
+    // Copy available array to work array
+    for (int i = 0; i < num_resources; i++) work[i] = available[i];
+    
+    int count = 0;
+    while (count < num_processes) {
+        bool found = false;
+        for (int p = 0; p < num_processes; p++) {
+            if (!finish[p]) {
+                int j;
+                for (j = 0; j < num_resources; j++) {
+                    if (need[p][j] > work[j]) break;
+                }
+                
+                // If all needs can be satisfied by current work resources
+                if (j == num_resources) {
+                    for (int k = 0; k < num_resources; k++) {
+                        work[k] += allocation[p][k];
+                    }
+                    safe_sequence[count++] = p;
+                    finish[p] = true;
+                    found = true;
+                }
+            }
+        }
+        // If we loop through all processes and can't find a safe one, it's an UNSAFE state
+        if (!found) return false; 
+    }
+    return true; // SAFE state
+}
+
+// 3. Resource Request Algorithm
+bool request_resources(int pid, int request[]) {
+    // Step 1: Check if request exceeds what they originally declared they would need
+    for (int i = 0; i < num_resources; i++) {
+        if (request[i] > need[pid][i]) return false; // Error: Exceeded max claim
+    }
+    
+    // Step 2: Check if request exceeds currently available resources
+    for (int i = 0; i < num_resources; i++) {
+        if (request[i] > available[i]) return false; // Must wait
+    }
+    
+    // Step 3: Pretend to allocate to see if it causes a deadlock
+    for (int i = 0; i < num_resources; i++) {
+        available[i] -= request[i];
+        allocation[pid][i] += request[i];
+        need[pid][i] -= request[i];
+    }
+    
+    // Step 4: Run Banker's Algorithm to check safety
+    int temp_seq[MAX_PROCESSES];
+    if (is_safe_state(temp_seq)) {
+        return true; // Allocation granted
+    } else {
+        // Rollback! Allocation leads to UNSAFE state (potential deadlock)
+        for (int i = 0; i < num_resources; i++) {
+            available[i] += request[i];
+            allocation[pid][i] -= request[i];
+            need[pid][i] += request[i];
+        }
+        return false; // Request denied
+    }
+}
+
+// 4. Deadlock Recovery (Terminate a process and reclaim resources)
+void recover_deadlock(int pid) {
+    for (int i = 0; i < num_resources; i++) {
+        available[i] += allocation[pid][i];
+        allocation[pid][i] = 0;
+        need[pid][i] = maximum[pid][i]; // Reset need
+    }
+}
