@@ -1,0 +1,9 @@
+#include "page_replacement.h"
+#include <stdio.h>
+static int getint(const char *s,int lo,int hi){int x,c;for(;;){printf("%s",s);if(scanf("%d",&x)==1&&x>=lo&&x<=hi)return x;puts("Invalid input.");while((c=getchar())!='\n'&&c!=EOF){}}}
+static int input(int *p){int n=getint("Number of references (1-1000): ",1,MAX_REFERENCES);printf("Enter %d non-negative page numbers: ",n);for(int i=0;i<n;i++)if(scanf("%d",&p[i])!=1||p[i]<0){puts("Invalid page reference.");return 0;}return n;}
+int main(void){int p[MAX_REFERENCES];puts("PAGE REPLACEMENT SIMULATOR");int n=input(p);if(!n)return 1;int nf=getint("Number of frames (1-100): ",1,MAX_FRAMES);
+ for(;;){puts("\n1 FIFO\n2 LRU\n3 Optimal\n4 Compare all\n5 New reference string\n0 Exit");int c=getint("Choice: ",0,5);if(!c)break;if(c==5){n=input(p);if(!n)return 1;nf=getint("Number of frames: ",1,MAX_FRAMES);continue;}
+ if(c==4){SimulationResult r[3];for(int a=1;a<=3;a++){simulate(p,n,nf,(Algorithm)a,&r[a-1]);print_simulation(p,&r[a-1],(Algorithm)a);}print_comparison(r,3);}
+ else{SimulationResult r;if(simulate(p,n,nf,(Algorithm)c,&r))print_simulation(p,&r,(Algorithm)c);}
+ }return 0;}
