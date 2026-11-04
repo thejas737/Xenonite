@@ -1,0 +1,97 @@
+#include "scheduler.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void clear_input(void) {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) {}
+}
+
+static int read_int(const char *prompt, int min, int max) {
+    int value;
+    for (;;) {
+        printf("%s", prompt);
+        if (scanf("%d", &value) == 1 && value >= min && value <= max) return value;
+        printf("Invalid input. Enter a value from %d to %d.\n", min, max);
+        clear_input();
+    }
+}
+
+static void input_processes(Process p[], int n) {
+    printf("\nEnter process details (priority: smaller number = higher priority).\n");
+    for (int i = 0; i < n; ++i) {
+        printf("\nProcess %d ID (e.g. P%d): ", i + 1, i + 1);
+        if (scanf("%15s", p[i].id) != 1) {
+            snprintf(p[i].id, NAME_LEN, "P%d", i + 1);
+            clear_input();
+        }
+        char prompt[100];
+        snprintf(prompt, sizeof(prompt), "Arrival time for %s: ", p[i].id);
+        p[i].arrival = read_int(prompt, 0, 100000);
+        snprintf(prompt, sizeof(prompt), "Burst time for %s: ", p[i].id);
+        p[i].burst = read_int(prompt, 1, 100000);
+        snprintf(prompt, sizeof(prompt), "Priority for %s: ", p[i].id);
+        p[i].priority = read_int(prompt, 0, 100000);
+    }
+}
+
+static void run_one(const Process p[], int n, enum Algorithm alg, int quantum) {
+    ScheduleResult result;
+    if (!run_schedule(p, n, alg, quantum, &result)) {
+        printf("Could not run this schedule. Check the inputs.\n");
+        return;
+    }
+    print_report(p, n, &result);
+}
+
+static void compare_all(const Process p[], int n, int quantum) {
+    enum Algorithm algs[] = {FCFS, SJF_NP, SJF_P, PRIORITY_NP, PRIORITY_P, ROUND_ROBIN};
+    printf("\n================ ALGORITHM COMPARISON ================\n");
+    printf("%-27s %12s %12s %12s %12s\n",
+           "Algorithm", "Avg WT", "Avg TAT", "Avg RT", "CPU Util%");
+    for (int i = 0; i < 6; ++i) {
+        ScheduleResult r;
+        if (run_schedule(p, n, algs[i], quantum, &r))
+            printf("%-27s %12.2f %12.2f %12.2f %11.2f\n",
+                   algorithm_name(algs[i]), r.avg_waiting, r.avg_turnaround,
+                   r.avg_response, r.cpu_utilization);
+    }
+}
+
+int main(void) {
+    Process p[MAX_PROCESSES];
+    printf("============================================\n");
+    printf("       CPU PROCESS SCHEDULING SIMULATOR\n");
+    printf("============================================\n");
+    int n = read_int("Number of processes (1-100): ", 1, MAX_PROCESSES);
+    input_processes(p, n);
+    int quantum = read_int("\nRound Robin time quantum (>=1): ", 1, 100000);
+
+    for (;;) {
+        printf("\n--------------- MAIN MENU ---------------\n");
+        printf("1. FCFS\n");
+        printf("2. SJF - Non-preemptive\n");
+        printf("3. SJF - Preemptive (SRTF)\n");
+        printf("4. Priority - Non-preemptive\n");
+        printf("5. Priority - Preemptive\n");
+        printf("6. Round Robin\n");
+        printf("7. Compare all algorithms\n");
+        printf("8. Enter a new process set\n");
+        printf("0. Exit\n");
+        int choice = read_int("Choose an option: ", 0, 8);
+        if (choice == 0) {
+            printf("Exiting scheduler simulator. Goodbye!\n");
+            break;
+        }
+        if (choice == 8) {
+            n = read_int("Number of processes (1-100): ", 1, MAX_PROCESSES);
+            input_processes(p, n);
+            quantum = read_int("Round Robin time quantum: ", 1, 100000);
+            continue;
+        }
+        if (choice == 7) compare_all(p, n, quantum);
+        else run_one(p, n, (enum Algorithm)choice, quantum);
+    }
+    return 0;
+}
