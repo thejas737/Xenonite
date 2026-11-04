@@ -1,0 +1,120 @@
+#include "common.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+static mqd_t open_queue(const char *name, long msg_size) {
+    struct mq_attr attr; memset(&attr, 0, sizeof(attr));
+    attr.mq_maxmsg = 10; attr.mq_msgsize = msg_size;
+    mqd_t q = mq_open(name, O_CREAT | O_RDWR, 0660, &attr);
+    if (q == (mqd_t)-1) perror(name);
+    return q;
+}
+
+static void log_event(mqd_t logq, const char *text) {
+    Message m; memset(&m, 0, sizeof(m)); m.type = 1; set_text(&m, text);
+    if (mq_send(logq, (const char *)&m, sizeof(m), 0) == -1) perror("mq_send log");
+}
+
+static void respond(mqd_t respq, const char *text) {
+    Message m; memset(&m, 0, sizeof(m)); set_text(&m, text);
+    if (mq_send(respq, (const char *)&m, sizeof(m), 0) == -1) perror("mq_send response");
+}
+
+static void show_state(char *out, size_t n, int memory[], int stack[], int *top,
+                       int queue[], int *qhead, int *qcount) {
+    size_t used = 0;
+    used += (size_t)snprintf(out + used, n - used, "Memory slots: ");
+    for (int i = 0; i < MEMORY_SIZE && used < n; ++i)
+        used += (size_t)snprintf(out + used, n - used, "[%d]=%d ", i, memory[i]);
+    used += (size_t)snprintf(out + used, n - used, "\nStack (bottom->top): ");
+    for (int i = 0; i <= *top && used < n; ++i)
+        used += (size_t)snprintf(out + used, n - used, "%d ", stack[i]);
+    if (*top < 0) used += (size_t)snprintf(out + used, n - used, "(empty)");
+    used += (size_t)snprintf(out + used, n - used, "\nQueue (front->back): ");
+    for (int i = 0; i < *qcount && used < n; ++i)
+        used += (size_t)snprintf(out + used, n - used, "%d ", queue[(*qhead + i) % QUEUE_SIZE]);
+    if (*qcount == 0) used += (size_t)snprintf(out + used, n - used, "(empty)");
+}
+
+int main(void) {
+    mqd_t cmdq = open_queue(CMD_QUEUE, sizeof(Message));
+    mqd_t respq = open_queue(RESP_QUEUE, sizeof(Message));
+    mqd_t logq = open_queue(LOG_QUEUE, sizeof(Message));
+    if (cmdq == (mqd_t)-1 || respq == (mqd_t)-1 || logq == (mqd_t)-1) return 1;
+
+    int memory[MEMORY_SIZE] = {0};
+    int stack[STACK_SIZE], top = -1;
+    int queue[QUEUE_SIZE], qhead = 0, qcount = 0;
+    log_event(logq, "Core process started.");
+
+    for (;;) {
+        Message req;
+        if (mq_receive(cmdq, (char *)&req, sizeof(req), NULL) == -1) {
+            if (errno == EINTR) continue;
+            perror("mq_receive command"); break;
+        }
+        char out[TEXT_LEN]; memset(out, 0, sizeof(out));
+        switch (req.type) {
+            case CMD_ADD: {
+                char *end = NULL; long b = strtol(req.text, &end, 10);
+                if (end == req.text || *end != '\0') snprintf(out, sizeof(out), "Invalid second operand.");
+                else {
+                    long long result = (long long)req.value + b;
+                    snprintf(out, sizeof(out), "CPU ADD result: %d + %ld = %lld", req.value, b, result);
+                    memory[0] = (int)result;
+                    log_event(logq, out);
+                }
+                break;
+            }
+            case CMD_MEM_READ:
+                if (req.value < 0 || req.value >= MEMORY_SIZE) snprintf(out, sizeof(out), "Error: memory slot must be 0-%d.", MEMORY_SIZE - 1);
+                else snprintf(out, sizeof(out), "Memory[%d] = %d", req.value, memory[req.value]);
+                log_event(logq, out); break;
+            case CMD_PUSH:
+                if (top >= STACK_SIZE - 1) snprintf(out, sizeof(out), "Error: stack overflow.");
+                else { stack[++top] = req.value; snprintf(out, sizeof(out), "Pushed %d onto stack.", req.value); }
+                log_event(logq, out); break;
+            case CMD_POP:
+                if (top < 0) snprintf(out, sizeof(out), "Error: stack underflow.");
+                else snprintf(out, sizeof(out), "Popped %d from stack.", stack[top--]);
+                log_event(logq, out); break;
+            case CMD_ENQUEUE:
+                if (qcount >= QUEUE_SIZE) snprintf(out, sizeof(out), "Error: queue is full.");
+                else { queue[(qhead + qcount) % QUEUE_SIZE] = req.value; ++qcount; snprintf(out, sizeof(out), "Enqueued %d.", req.value); }
+                log_event(logq, out); break;
+            case CMD_DEQUEUE:
+                if (qcount == 0) snprintf(out, sizeof(out), "Error: queue is empty.");
+                else { int v = queue[qhead]; qhead = (qhead + 1) % QUEUE_SIZE; --qcount; snprintf(out, sizeof(out), "Dequeued %d.", v); }
+                log_event(logq, out); break;
+            case CMD_SHOW:
+                show_state(out, sizeof(out), memory, stack, &top, queue, &qhead, &qcount);
+                log_event(logq, "Displayed current memory, stack and queue state."); break;
+            case CMD_BENCHMARK: {
+                volatile unsigned long long sum = 0;
+                struct timespec start, end;
+                clock_gettime(CLOCK_MONOTONIC, &start);
+                for (int i = 0; i < req.value; ++i) sum += (unsigned long long)i;
+                clock_gettime(CLOCK_MONOTONIC, &end);
+                double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+                snprintf(out, sizeof(out), "Core benchmark: %d loop iterations in %.6f seconds (checksum=%llu).", req.value, elapsed, sum);
+                log_event(logq, out); break;
+            }
+            case CMD_SHUTDOWN:
+                respond(respq, "Shutdown request received. Stopping core and logger.");
+                log_event(logq, "Core process stopping.");
+                { Message stop; memset(&stop, 0, sizeof(stop)); stop.type = -1; set_text(&stop, "STOP");
+                  if (mq_send(logq, (const char *)&stop, sizeof(stop), 0) == -1) perror("send logger stop"); }
+                mq_close(cmdq); mq_close(respq); mq_close(logq);
+                return 0;
+            default: snprintf(out, sizeof(out), "Error: unknown command."); log_event(logq, out); break;
+        }
+        respond(respq, out);
+    }
+    mq_close(cmdq); mq_close(respq); mq_close(logq);
+    return 1;
+}
