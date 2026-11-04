@@ -1,0 +1,42 @@
+#include "common.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+int main(void) {
+    struct mq_attr attr; memset(&attr, 0, sizeof(attr));
+    attr.mq_maxmsg = 10; attr.mq_msgsize = sizeof(Message);
+    mqd_t logq = mq_open(LOG_QUEUE, O_CREAT | O_RDONLY, 0660, &attr);
+    if (logq == (mqd_t)-1) { perror("logger mq_open"); return 1; }
+    FILE *file = fopen(LOG_FILE, "a");
+    if (!file) { perror("fopen simulator.log"); mq_close(logq); return 1; }
+    fprintf(file, "\n=== Logger session started ===\n"); fflush(file);
+    printf("Logger process running. Writing events to %s\n", LOG_FILE);
+    for (;;) {
+        Message m;
+        if (mq_receive(logq, (char *)&m, sizeof(m), NULL) == -1) {
+            if (errno == EINTR) continue;
+            perror("logger mq_receive"); break;
+        }
+        if (m.type == -1) {
+            time_t now = time(NULL); char stamp[32];
+            struct tm *tm_info = localtime(&now);
+            if (tm_info) strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", tm_info);
+            else snprintf(stamp, sizeof(stamp), "unknown-time");
+            fprintf(file, "[%s] %s\n", stamp, m.text); fflush(file);
+            break;
+        }
+        time_t now = time(NULL); char stamp[32];
+        struct tm *tm_info = localtime(&now);
+        if (tm_info) strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", tm_info);
+        else snprintf(stamp, sizeof(stamp), "unknown-time");
+        fprintf(file, "[%s] %s\n", stamp, m.text); fflush(file);
+    }
+    fprintf(file, "=== Logger session ended ===\n");
+    fclose(file); mq_close(logq);
+    puts("Logger process stopped.");
+    return 0;
+}
