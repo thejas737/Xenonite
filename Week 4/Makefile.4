@@ -1,0 +1,12 @@
+CC=gcc
+CFLAGS=-Wall -Wextra -std=c11 -O2
+all: libdeadlock.so deadlock_test
+libdeadlock.so: banker.c graph.c deadlock.h
+	$(CC) $(CFLAGS) -fPIC -shared banker.c graph.c -o libdeadlock.so
+deadlock_test: main.c banker.c deadlock.h
+	$(CC) $(CFLAGS) main.c banker.c -o deadlock_test
+run: all
+	python3 gui.py
+clean:
+	rm -f libdeadlock.so deadlock_test
+.PHONY: all run clean
