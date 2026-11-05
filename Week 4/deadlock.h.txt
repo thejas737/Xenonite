@@ -1,0 +1,9 @@
+#ifndef DEADLOCK_H
+#define DEADLOCK_H
+#define MAX_PROCESSES 20
+#define MAX_RESOURCES 10
+int banker_safe(int p,int r,const int *available,const int *allocation,const int *maximum,int *safe_sequence);
+void detect_deadlock(int p,int r,const int *available,const int *allocation,const int *request,int *deadlocked);
+int request_resources(int p,int r,int process_index,int *available,int *allocation,const int *maximum,const int *request_vector,int *safe_sequence);
+void release_process_resources(int p,int r,int process_index,int *available,int *allocation,int *request);
+#endif
