@@ -1,0 +1,9 @@
+#include "deadlock.h"
+#include <stdio.h>
+int main(void){
+ int av[]={3,3,2},al[]={0,1,0,2,0,0,3,0,2,2,1,1,0,0,2};
+ int mx[]={7,5,3,3,2,2,9,0,2,2,2,2,4,3,3},seq[5];
+ if(banker_safe(5,3,av,al,mx,seq)){printf("SAFE sequence: ");for(int i=0;i<5;i++)printf("P%d%s",seq[i],i==4?"\n":" -> ");}
+ else puts("UNSAFE state");
+ return 0;
+}
